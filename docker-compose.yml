@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: razorpay_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: razorpay_emandate
+      MYSQL_USER: razorpay_user
+      MYSQL_PASSWORD: razorpay_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: --default-authentication-plugin=mysql_native_password
+
+  redis:
+    image: redis:7-alpine
+    container_name: razorpay_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  api:
+    build: .
+    container_name: razorpay_api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=mysql+pymysql://razorpay_user:razorpay_pass@mysql:3306/razorpay_emandate
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    depends_on:
+      - mysql
+      - redis
+    volumes:
+      - ./app:/app/app
+      - ./logs:/app/logs
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  celery:
+    build: .
+    container_name: razorpay_celery
+    environment:
+      - DATABASE_URL=mysql+pymysql://razorpay_user:razorpay_pass@mysql:3306/razorpay_emandate
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    depends_on:
+      - mysql
+      - redis
+    volumes:
+      - ./app:/app/app
+      - ./logs:/app/logs
+    command: celery -A app.core.celery_app worker --loglevel=info
+
+  celery-beat:
+    build: .
+    container_name: razorpay_celery_beat
+    environment:
+      - DATABASE_URL=mysql+pymysql://razorpay_user:razorpay_pass@mysql:3306/razorpay_emandate
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    depends_on:
+      - mysql
+      - redis
+    volumes:
+      - ./app:/app/app
+      - ./logs:/app/logs
+    command: celery -A app.core.celery_app beat --loglevel=info
+
+volumes:
+  mysql_data:
+  redis_data:
